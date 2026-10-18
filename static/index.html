@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#4f46e5">
+<title>ReadVocab · 论文取词</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#/">
+    <span class="brand-mark">R</span>
+    <span class="brand-text">ReadVocab</span>
+  </a>
+  <nav class="nav">
+    <a href="#/" data-nav="library">文档库</a>
+    <a href="#/vocab" data-nav="vocab">生词本</a>
+    <a href="#/stats" data-nav="stats">统计</a>
+  </nav>
+  <div class="topbar-right">
+    <span id="today-badge" class="pill" hidden></span>
+    <button id="theme-btn" class="icon-btn" title="切换主题" aria-label="切换主题">◐</button>
+  </div>
+</header>
+<main id="view"></main>
+<div id="toast" class="toast"></div>
+<div id="popup-root"></div>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
