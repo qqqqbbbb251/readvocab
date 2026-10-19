@@ -62,7 +62,7 @@ export async function mountVocab(view) {
         </div>
         <div class="senses">${escapeHtml(item.senses || "（暂无释义）").replace(/\n/g, "<br>")}</div>
         ${contexts}
-        <div class="vocab-meta">收录于 ${fmtDate(item.first_seen_at)} · ${item.source === "llm" ? "AI 释义" : "本地词典"}</div>
+        <div class="vocab-meta">收录于 ${fmtDate(item.first_seen_at)} · ${item.source === "llm" ? "AI 释义" : item.source === "free" ? "免费翻译" : "本地词典"}</div>
       </article>`;
   }
 

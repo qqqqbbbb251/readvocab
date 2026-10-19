@@ -14,8 +14,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import free_translate
 import llm
-from config import BASE, llm_config
+from config import BASE, llm_config, mymemory_email
 from db import DB_PATH, PDF_DIR, db, init_db, now_str, today_str
 
 STATIC_DIR = BASE / "static"
@@ -223,6 +224,51 @@ async def translate(body: TranslateIn):
             (key, json.dumps(result, ensure_ascii=False), now_str()),
         )
     return {"ok": True, "cached": False, "mode": mode, "text": text, "result": result}
+
+
+class FreeTranslateIn(BaseModel):
+    text: str
+
+
+@app.post("/api/free-translate")
+async def free_translate_text(body: FreeTranslateIn):
+    text = clean_text(body.text, 1800)
+    if not text:
+        raise HTTPException(400, "没有可翻译的文本")
+    key = hashlib.sha256(f"free|mymemory|{text}".encode("utf-8")).hexdigest()
+    with db() as conn:
+        cached = conn.execute(
+            "SELECT result FROM llm_cache WHERE key = ?", (key,)
+        ).fetchone()
+        if cached is not None:
+            payload = json.loads(cached[0])
+            return {
+                "ok": True,
+                "cached": True,
+                "provider": "mymemory",
+                "text": text,
+                "translation": payload.get("translation", ""),
+            }
+    try:
+        translation = await free_translate.translate(text, mymemory_email())
+    except free_translate.FreeTranslateError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    with db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO llm_cache (key, result, created_at) VALUES (?, ?, ?)",
+            (
+                key,
+                json.dumps({"translation": translation}, ensure_ascii=False),
+                now_str(),
+            ),
+        )
+    return {
+        "ok": True,
+        "cached": False,
+        "provider": "mymemory",
+        "text": text,
+        "translation": translation,
+    }
 
 
 class VocabIn(BaseModel):

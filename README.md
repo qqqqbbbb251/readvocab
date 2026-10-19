@@ -10,7 +10,8 @@
 - 词形归一：`study` / `studies` / `studied` 只记为一个词
 - 生词本：搜索、状态筛选（新词 / 学习中 / 已掌握）、多语境保留、发音
 - 统计：累计收录、今日新增、连续天数、本周查阅、年度热力图、按文档分布
-- 词典未命中或选中整句时，可选调用 DeepSeek
+- 整句翻译：免费使用 MyMemory，无需 API key；选中整句或点“免费翻译本句”即可
+- 可选调用 DeepSeek，获得更准确的 AI 查词和翻译
 - 深色模式，数据全部保存在本机
 
 ## 技术栈
@@ -19,6 +20,7 @@
 - 前端：原生 ES Modules，无构建步骤
 - PDF：pdf.js 4.10（已内置在 `static/vendor/pdfjs`，Apache-2.0）
 - 词典：ECDICT
+- 免费翻译：MyMemory
 - 可选 LLM：DeepSeek（OpenAI 兼容接口）
 
 ## 快速开始
@@ -52,7 +54,17 @@ python importer.py
 python importer.py D:\path\to\ecdict.csv
 ```
 
-### 3. 配置 LLM（可选）
+### 3. 免费翻译（可选配置）
+
+整句翻译默认使用 MyMemory，不需要 API key。匿名使用每天有约 5000 字符的额度；在 `.env` 中填写 `MYMEMORY_EMAIL` 可以提高到约 50000 字符/天。
+
+```
+MYMEMORY_EMAIL=you@example.com
+```
+
+使用免费翻译时，选中的文本会发送到 MyMemory。
+
+### 4. 配置 LLM（可选）
 
 复制 `.env.example` 为 `.env`，填入 DeepSeek key：
 
@@ -60,9 +72,9 @@ python importer.py D:\path\to\ecdict.csv
 DEEPSEEK_API_KEY=sk-...
 ```
 
-不填也能正常使用本地查词、生词本和统计，只是无法使用 AI 查词和整句翻译。
+不填也能使用本地查词、免费翻译、生词本和统计，只是无法使用 AI 查词和 AI 翻译。
 
-### 4. 启动
+### 5. 启动
 
 ```bash
 python -X utf8 app.py
@@ -73,8 +85,8 @@ Windows 下也可以直接双击 `start.bat`，然后打开 <http://127.0.0.1:80
 ## 使用
 
 1. 拖入一个文本型 PDF（扫描版没有文本层，无法取词）
-2. 双击单词，或拖选短语
-3. 在卡片里查看释义和原句，点“加入生词本”
+2. 双击单词查看释义；点卡片里的“免费翻译本句”可以直接翻译所在句
+3. 拖选一整个句子，在弹卡里点“免费翻译”或“AI 翻译”
 4. 在“生词本”里搜索、修改学习状态
 5. 在“统计”里查看每日新增和连续天数
 
@@ -82,6 +94,7 @@ Windows 下也可以直接双击 `start.bat`，然后打开 <http://127.0.0.1:80
 
 - `data/` 和 `.env` 已加入 `.gitignore`，不会提交到仓库
 - 数据库、PDF 和生词记录只存在本机
+- 使用免费翻译或 AI 翻译时，选中文本会发送到对应的外部服务
 - 请勿把填了 API key 的 `.env` 提交到公开仓库
 
 ## 目录结构

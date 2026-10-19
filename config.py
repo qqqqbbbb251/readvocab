@@ -30,3 +30,7 @@ def llm_config():
         "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/"),
         "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip(),
     }
+
+
+def mymemory_email():
+    return os.getenv("MYMEMORY_EMAIL", "").strip()

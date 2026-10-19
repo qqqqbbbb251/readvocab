@@ -33,21 +33,31 @@ function buildPageText(items) {
 
 function extractSentence(pageText, target) {
   if (!pageText) return "";
+  const flat = pageText.replace(/\s+/g, " ").trim();
   const needle = target.toLowerCase().replace(/\s+/g, " ").trim();
   if (!needle) return "";
-  const segments = pageText
-    .replace(/[ \t]+/g, " ")
-    .trim()
-    .split(/(?<=[.!?])\s+|\n+/);
-  const hit = segments.find((segment) =>
-    segment.replace(/\s+/g, " ").toLowerCase().includes(needle)
-  );
-  if (hit) return hit.replace(/\s+/g, " ").trim().slice(0, 500);
-  const flat = pageText.replace(/\s+/g, " ").trim();
-  const first = needle.split(" ")[0];
-  const index = flat.toLowerCase().indexOf(first);
+  let index = flat.toLowerCase().indexOf(needle);
+  if (index === -1) {
+    index = flat.toLowerCase().indexOf(needle.split(" ")[0]);
+  }
   if (index === -1) return "";
-  return flat.slice(Math.max(0, index - 180), index + needle.length + 180).trim();
+  const before = flat.slice(0, index);
+  let start = 0;
+  const boundaries = [...before.matchAll(/[.!?:;](?=\s|$)/g)];
+  if (boundaries.length) {
+    start = boundaries[boundaries.length - 1].index + 1;
+  } else {
+    const lineStart = before.lastIndexOf("\n");
+    if (lineStart >= 0) start = lineStart + 1;
+  }
+  const after = flat.slice(index);
+  const endMatch = after.match(/[.!?](?=\s|$)/);
+  const end = endMatch ? index + endMatch.index + 1 : flat.length;
+  let sentence = flat.slice(start, end).replace(/\s+/g, " ").trim();
+  if (sentence.length > 500) {
+    sentence = sentence.slice(0, 500).trim();
+  }
+  return sentence;
 }
 
 function sensesHtml(text) {
@@ -68,9 +78,13 @@ function errorHtml(message) {
 }
 
 export async function mountReader(view, docId) {
-  const data = await api("/api/documents");
+  const [data, health] = await Promise.all([
+    api("/api/documents"),
+    api("/api/health").catch(() => ({})),
+  ]);
   const doc = (data.items || []).find((item) => item.id === docId);
   if (!doc) throw new Error("文档不存在或已被删除");
+  const llmAvailable = !!health.llm_configured;
 
   view.innerHTML = `
     <div class="reader">
@@ -121,6 +135,7 @@ export async function mountReader(view, docId) {
   let popup = null;
   let popupRect = null;
   let popupToken = 0;
+  let selecting = false;
   let observer = null;
   let chain = Promise.resolve();
   let firstShown = false;
@@ -365,6 +380,68 @@ export async function mountReader(view, docId) {
     });
   }
 
+  async function runFreeTranslate(box, text, context) {
+    const token = popupToken;
+    box.innerHTML = loadingHtml("免费翻译中…");
+    positionPopup();
+    try {
+      const response = await api("/api/free-translate", {
+        method: "POST",
+        body: { text },
+      });
+      if (token !== popupToken) return;
+      const translation = response.translation || "";
+      const prepared = {
+        lemma: text.toLowerCase(),
+        form: text,
+        phonetic: "",
+        senses: translation,
+        definition: "",
+        source: "free",
+        doc_id: docId,
+        page: context.page,
+        sentence: context.sentence,
+      };
+      box.innerHTML = `
+        <div class="popup-head">
+          <div class="popup-wordline"><strong>${escapeHtml(context.isWord ? text : "免费翻译")}</strong></div>
+          <div class="popup-sub">MyMemory${response.cached ? " · 缓存命中" : ""}</div>
+        </div>
+        <div class="popup-translation">${escapeHtml(translation).replace(/\n/g, "<br>")}</div>
+        ${context.sentence && context.sentence !== text ? `<blockquote class="popup-context">${escapeHtml(context.sentence)}</blockquote>` : ""}
+        <div class="popup-actions">
+          ${context.isWord ? `<button class="btn primary small" data-add>加入生词本</button>` : ""}
+          <button class="btn small" data-copy>复制译文</button>
+          ${llmAvailable ? `<button class="btn small" data-ai>AI 翻译（更准）</button>` : ""}
+        </div>
+        <p class="popup-footnote">免费翻译适合快速理解，术语和长句可能不够准确。</p>`;
+      if (context.isWord) bindAdd(box, prepared);
+      box.querySelector("[data-copy]").addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(translation);
+          toast("译文已复制");
+        } catch (error) {
+          toast("复制失败，请手动选择文本", "warn");
+        }
+      });
+      const aiButton = box.querySelector("[data-ai]");
+      if (aiButton) {
+        aiButton.addEventListener("click", () => {
+          if (context.isWord) {
+            runAiWord(box, text, context);
+          } else {
+            runAiSentence(box, text, context);
+          }
+        });
+      }
+      positionPopup();
+    } catch (error) {
+      if (token !== popupToken) return;
+      box.innerHTML = errorHtml(error.message);
+      positionPopup();
+    }
+  }
+
   function renderDict(box, result, context) {
     const prepared = {
       lemma: (result.lemma || context.text).toLowerCase(),
@@ -404,10 +481,26 @@ export async function mountReader(view, docId) {
       ${context.sentence ? `<blockquote class="popup-context">${escapeHtml(context.sentence)}</blockquote>` : ""}
       <div class="popup-actions">
         <button class="btn primary small" data-add>加入生词本</button>
-        ${result.found ? "" : `<button class="btn small" data-ai>AI 查词</button>`}
+        ${result.found ? "" : `<button class="btn small" data-free>免费翻译</button>`}
+        ${context.sentence ? `<button class="btn small" data-sentence>免费翻译本句</button>` : ""}
+        ${!result.found && llmAvailable ? `<button class="btn small" data-ai>AI 查词</button>` : ""}
       </div>`;
     bindSpeak(box, result.form || context.text);
     bindAdd(box, prepared);
+    const freeButton = box.querySelector("[data-free]");
+    if (freeButton) {
+      freeButton.addEventListener("click", () => runFreeTranslate(box, context.text, context));
+    }
+    const sentenceButton = box.querySelector("[data-sentence]");
+    if (sentenceButton) {
+      sentenceButton.addEventListener("click", () => {
+        runFreeTranslate(box, context.sentence, {
+          ...context,
+          text: context.sentence,
+          isWord: false,
+        });
+      });
+    }
     const aiButton = box.querySelector("[data-ai]");
     if (aiButton) {
       aiButton.addEventListener("click", () => runAiWord(box, context.text, context));
@@ -419,13 +512,21 @@ export async function mountReader(view, docId) {
     const count = text.split(/\s+/).filter(Boolean).length;
     box.innerHTML = `
       <div class="popup-sub">选中 ${count} 个词</div>
-      <p class="popup-quote">${escapeHtml(text.slice(0, 260))}${text.length > 260 ? "…" : ""}</p>
+      <p class="popup-quote">${escapeHtml(text.slice(0, 320))}${text.length > 320 ? "…" : ""}</p>
       <div class="popup-actions">
-        <button class="btn primary small" data-ai>AI 翻译</button>
-      </div>`;
-    box.querySelector("[data-ai]").addEventListener("click", () => {
-      runAiSentence(box, text, context);
+        <button class="btn primary small" data-free>免费翻译</button>
+        ${llmAvailable ? `<button class="btn small" data-ai>AI 翻译（更准）</button>` : ""}
+      </div>
+      <p class="popup-footnote">免费翻译由 MyMemory 提供，适合快速理解。</p>`;
+    box.querySelector("[data-free]").addEventListener("click", () => {
+      runFreeTranslate(box, text, context);
     });
+    const aiButton = box.querySelector("[data-ai]");
+    if (aiButton) {
+      aiButton.addEventListener("click", () => {
+        runAiSentence(box, text, context);
+      });
+    }
     positionPopup();
   }
 
@@ -542,6 +643,8 @@ export async function mountReader(view, docId) {
   }
 
   function onMouseUp() {
+    if (!selecting) return;
+    selecting = false;
     setTimeout(() => {
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed) return;
@@ -549,9 +652,9 @@ export async function mountReader(view, docId) {
       if (!raw.trim()) return;
       const range = selection.getRangeAt(0);
       const node =
-        range.commonAncestorContainer.nodeType === 1
-          ? range.commonAncestorContainer
-          : range.commonAncestorContainer.parentElement;
+        range.startContainer.nodeType === 1
+          ? range.startContainer
+          : range.startContainer.parentElement;
       if (!node || !node.closest) return;
       const pageEl = node.closest(".pdf-page");
       if (!pageEl || !scrollEl.contains(pageEl)) return;
@@ -564,11 +667,13 @@ export async function mountReader(view, docId) {
   }
 
   function onMouseDown() {
+    selecting = true;
     if (popup) closePopup();
   }
 
   function onDocMouseDown(event) {
     if (popup && !popup.contains(event.target)) closePopup();
+    if (!scrollEl.contains(event.target)) selecting = false;
   }
 
   function onKeyDown(event) {
@@ -607,8 +712,8 @@ export async function mountReader(view, docId) {
   schedule(currentPage);
   schedule(currentPage + 1);
   scrollEl.addEventListener("scroll", onScroll, { passive: true });
-  scrollEl.addEventListener("mouseup", onMouseUp);
   scrollEl.addEventListener("mousedown", onMouseDown);
+  document.addEventListener("mouseup", onMouseUp);
   document.addEventListener("mousedown", onDocMouseDown);
   document.addEventListener("keydown", onKeyDown);
   window.addEventListener("resize", onResize);
@@ -616,8 +721,8 @@ export async function mountReader(view, docId) {
   return () => {
     if (observer) observer.disconnect();
     scrollEl.removeEventListener("scroll", onScroll);
-    scrollEl.removeEventListener("mouseup", onMouseUp);
     scrollEl.removeEventListener("mousedown", onMouseDown);
+    document.removeEventListener("mouseup", onMouseUp);
     document.removeEventListener("mousedown", onDocMouseDown);
     document.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("resize", onResize);
